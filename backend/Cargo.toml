@@ -1,0 +1,19 @@
+[package]
+name = "backend"
+version = "0.1.0"
+edition = "2021"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+shared = { path = "../shared" }
+axum = "0.7.2"
+sqlx = { version = "0.7", features = [ "runtime-tokio", "sqlite" ] }
+serde = "1.0.193"
+tokio = {version = "1.35.1", features = [ "full" ]}
+tracing-subscriber = "0.3.18"
+uuid = {version = "1.6.1", features = [ "v7" ]}
+rand = "0.8.5"
+hex = "0.4.3"
+num-bigint = "0.4.4"
+base64 = "0.21.5"
