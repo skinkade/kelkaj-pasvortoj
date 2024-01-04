@@ -10,6 +10,7 @@ use shared::{
     },
 };
 use std::io::{self, BufRead};
+mod persistence;
 
 #[derive(Args, Debug)]
 struct RegisterInput {

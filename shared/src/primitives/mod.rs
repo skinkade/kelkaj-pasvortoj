@@ -55,10 +55,10 @@ impl SecretKey {
         let mut account_id: Vec<char> = account_id.chars().collect();
         let mut new_key: Vec<char> = (0..26).map(|_| key_mask[crypt_rand_uniform(key_mask_len) as usize]).collect();
         
-        let mut overall_key = vec!['A', '3'];
-        overall_key.append(&mut account_id);
-        overall_key.append(&mut new_key);
-        let overall_key: Vec<u8> = overall_key.iter().map(|c| *c as u8).collect();
+        // let mut overall_key = vec!['A', '3'];
+        // overall_key.append(&mut account_id);
+        // overall_key.append(&mut new_key);
+        let overall_key: Vec<u8> = new_key.iter().map(|c| *c as u8).collect();
 
         SecretKey(AutoZeroedByteArray(overall_key))
     }

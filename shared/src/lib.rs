@@ -3,6 +3,9 @@ pub mod derivation;
 pub mod crypto;
 pub mod flows;
 
+pub use rsa;
+// pub use pkcs1;
+
 pub fn add(left: usize, right: usize) -> usize {
     left + right
 }

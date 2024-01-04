@@ -95,7 +95,7 @@ fn create_account_and_log_in() {
 
     // Then we pick a password and generate our key material
     let password = "password";
-    let reg_info = generate_registration_info(password, email, account_id);
+    // let reg_info = generate_registration_info(password, email, account_id);
 
     // We upload our registration material to the server
     // TODO
