@@ -261,6 +261,5 @@ pub fn srp_exchange() {
     let ref_a = hex::encode(sha256(server_values.shared_secret.as_slice()));
     let ref_b = hex::encode(sha256(&finalized));
 
-    println!("{}\n{}", ref_a, ref_b);
     assert!(ref_a == ref_b);
 }

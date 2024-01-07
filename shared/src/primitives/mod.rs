@@ -1,3 +1,4 @@
+use serde::{Serialize, Deserialize};
 use unicode_normalization::UnicodeNormalization;
 use std::fmt::Display;
 use crate::crypto::crypt_rand_uniform;
@@ -81,3 +82,16 @@ pub struct SecureRemotePasswordSecret(pub AutoZeroedByteArray);
 pub struct Salt(pub Vec<u8>);
 
 pub struct SrpVerifier(pub AutoZeroedByteArray);
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct Pbkdf2Params {
+    pub algo: String,
+    pub salt: String,
+    pub iterations: i32,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct AukEncryptedData {
+    pub ciphertext: String,
+    pub iv: String,
+}

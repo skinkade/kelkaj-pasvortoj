@@ -25,4 +25,5 @@ unicode-normalization = "0.1.22"
 version = "1.6.1"
 features = [
     "v4",
+    "serde"
 ]

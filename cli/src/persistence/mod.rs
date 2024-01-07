@@ -11,7 +11,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::json;
 use shared::{
     crypto,
-    primitives::{NormalizedPassword, SecretKey},
+    primitives::{NormalizedPassword, SecretKey, Pbkdf2Params, AukEncryptedData},
 };
 use shared::{
     crypto::aes256_gcm_decrypt,
@@ -25,19 +25,6 @@ use shared::{
     },
 };
 use substring::Substring;
-
-#[derive(Serialize, Deserialize)]
-pub struct Pbkdf2Params {
-    pub algo: String,
-    pub salt: String,
-    pub iterations: i32,
-}
-
-#[derive(Serialize, Deserialize)]
-pub struct AukEncryptedData {
-    ciphertext: String,
-    iv: String,
-}
 
 #[derive(Serialize, Deserialize)]
 pub struct SerializedUserData {
@@ -156,8 +143,8 @@ pub fn load_user_data(raw_email: &str, password: String) -> Result<UserData> {
     let password = NormalizedPassword::new(password);
     let account_id = serialized.account_string.substring(2, 8).to_string();
     let secret_key = serialized.account_string.substring(8, 34);
-    println!("{}", serialized.account_string);
-    println!("{} {}", account_id, secret_key);
+    // println!("{}", serialized.account_string);
+    // println!("{} {}", account_id, secret_key);
     let secret_key = SecretKey(AutoZeroedByteArray::new(secret_key.as_bytes().to_vec()));
 
     let auk_salt = b64::STANDARD
@@ -257,4 +244,58 @@ fn user_data_persistence_test() {
 
     let loaded = load_user_data(email, password.to_string());
     assert!(loaded.is_ok());
+}
+
+#[derive(Serialize, Deserialize)]
+struct SerializedSession {
+    id: uuid::Uuid,
+    email: String,
+    shared_secret: String,
+}
+
+pub struct Session {
+    pub id: uuid::Uuid,
+    pub email: String,
+    pub shared_secret: AutoZeroedByteArray
+}
+
+pub fn save_session(session: &Session) -> Result<()> {
+    let ss = SerializedSession {
+        id: session.id,
+        email: session.email.clone(),
+        shared_secret: b64::STANDARD.encode(session.shared_secret.as_slice())
+    };
+
+    let json = json!(ss).to_string();
+
+    let home = home::home_dir().unwrap();
+    let path = home.join(".kelkaj-pasvortoj").join("session.json");
+
+    let mut file = match File::create(&path) {
+        Err(why) => return Err(anyhow!("couldn't create {}: {}", path.display(), why)),
+        Ok(file) => file,
+    };
+
+    match file.write_all(json.as_bytes()) {
+        Err(why) => Err(anyhow!("couldn't write to {}: {}", path.display(), why)),
+        Ok(_) => Ok(()),
+    }
+}
+
+pub fn load_session(email: &str) -> Result<Session> {
+    let home = home::home_dir().unwrap();
+    let path = home.join(".kelkaj-pasvortoj").join("session.json");
+
+    let file = match File::open(&path) {
+        Ok(file) => file,
+        Err(err) => return Err(anyhow!("could not read file: {}, {}", path.display(), err)),
+    };
+
+    let decoded: SerializedSession = serde_json::from_reader(&file)?;
+
+    Ok(Session {
+        id: decoded.id,
+        email: decoded.email,
+        shared_secret: AutoZeroedByteArray::new(b64::STANDARD.decode(&decoded.shared_secret).unwrap())
+    })
 }

@@ -3,13 +3,16 @@ use clap::{Args, Parser, Subcommand};
 use pkcs1::EncodeRsaPublicKey;
 use serde_json::json;
 use shared::{
-    crypto::{finalize_srp_exchange, generate_client_srp_exchange_value},
+    crypto::{aes256_gcm_encrypt, finalize_srp_exchange, generate_client_srp_exchange_value},
     flows::{
-        generate_registration_info, LoginHandshakeResponse, LoginHandshakeStart,
-        RegistrationCompletionRequest,
-    },
+        generate_registration_info, LoginHandshakeConfirmation, LoginHandshakeConfirmationResponse,
+        LoginHandshakeConfirmationValue, LoginHandshakeStart, LoginHandshakeStartResponse,
+        RegistrationCompletionRequest, RegistrationInitiationRequest,
+    }, primitives::{Pbkdf2Params, AukEncryptedData, NormalizedPassword, AutoZeroedByteArray},
 };
-use std::io::{self, BufRead};
+use std::io::{self, BufRead, Write};
+
+use crate::persistence::{UserData, Session};
 mod persistence;
 
 #[derive(Args, Debug)]
@@ -17,9 +20,15 @@ struct RegisterInput {
     email: String,
 }
 
+#[derive(Args, Debug)]
+struct LoginInput {
+    email: String,
+}
+
 #[derive(Subcommand, Debug)]
 pub enum Subcommands {
     Register(RegisterInput),
+    Login(LoginInput)
 }
 
 #[derive(Parser, Debug)]
@@ -28,9 +37,11 @@ struct Arguments {
     command: Subcommands,
 }
 
-async fn send_initial_registration_request(email: &str) {
+async fn register(email: &str) {
     let client = reqwest::Client::new();
-    let reg_body = serde_json::json!({ "email": email });
+    let reg_body = RegistrationInitiationRequest {
+        email: email.to_string(),
+    };
     println!("Sending registration request...");
     let resp = client
         .post("http://localhost:3000/invites/create")
@@ -38,34 +49,47 @@ async fn send_initial_registration_request(email: &str) {
         .send()
         .await
         .unwrap();
-    println!("{:?}", resp);
     println!("Sent! Check backend console for the following:");
 
     print!("Invitation ID: ");
+    let _ = io::stdout().flush();
     let mut invite_id = String::new();
     let _ = io::stdin().read_line(&mut invite_id);
     let invite_id = invite_id.trim().to_owned();
 
-    print!("\nAcceptance token: ");
+    print!("Acceptance token: ");
+    let _ = io::stdout().flush();
     let mut acceptance_token = String::new();
     let _ = io::stdin().read_line(&mut acceptance_token);
     let acceptance_token = acceptance_token.trim().to_owned();
 
-    print!("\nAccount ID: ");
+    print!("Account ID: ");
+    let _ = io::stdout().flush();
     let mut account_id = String::new();
     let _ = io::stdin().read_line(&mut account_id);
     let account_id = account_id.trim().to_owned();
 
-    print!("\nAnd now choose your password: ");
+    print!("And now choose your password: ");
+    let _ = io::stdout().flush();
     let mut password = String::new();
     let _ = io::stdin().lock().read_line(&mut password);
-    let password = password.trim().to_owned();
 
     let registration_info = generate_registration_info(&password, &email, &account_id);
 
     let confirmation = RegistrationCompletionRequest {
-        invite_id,
+        invite_id: uuid::Uuid::parse_str(&invite_id).unwrap(),
         acceptance_token,
+        auk_params: Pbkdf2Params {
+            iterations: 650_000,
+            salt: general_purpose::STANDARD.encode(&registration_info.encryption_key_salt.0),
+            algo: "PBKDF2-HMAC-SHA256".to_string()
+        },
+        srp_verifier: general_purpose::STANDARD.encode(registration_info.srp_verifier.0.as_slice()),
+        srp_params: Pbkdf2Params {
+            iterations: 650_000,
+            salt: general_purpose::STANDARD.encode(&registration_info.authentication_salt.0),
+            algo: "PBKDF2-HMAC-SHA256".to_string()
+        },
         public_key: general_purpose::STANDARD.encode(
             registration_info
                 .public_key
@@ -73,7 +97,10 @@ async fn send_initial_registration_request(email: &str) {
                 .unwrap()
                 .as_bytes(),
         ),
-        srp_verifier: general_purpose::STANDARD.encode(registration_info.srp_verifier.0.as_slice()),
+        enc_priv_key: AukEncryptedData {
+            iv: general_purpose::STANDARD.encode(&registration_info.encrypted_private_key_iv),
+            ciphertext: general_purpose::STANDARD.encode(&registration_info.encrypted_private_key)
+        }
     };
 
     let resp = client
@@ -82,30 +109,81 @@ async fn send_initial_registration_request(email: &str) {
         .send()
         .await
         .unwrap();
-    println!("{:?}", resp);
+    // println!("{:?}", resp);
+    // println!("{:?}", resp.text().await.unwrap());
 
+    let ud = UserData {
+        email: email.to_string(),
+        secret_key: registration_info.secret,
+        account_id,
+        auk: registration_info.auk,
+        auk_salt: registration_info.encryption_key_salt,
+        srpx: registration_info.srp,
+        srp_salt: registration_info.authentication_salt,
+        pub_key: registration_info.public_key,
+        priv_key: registration_info.private_key,
+    };
+    persistence::save_user_data(&ud);
+    println!("Registration successful!");
+}
+
+async fn login(email: String) {
+    print!("Password: ");
+    let _ = io::stdout().flush();
+    let mut password = String::new();
+    let _ = io::stdin().lock().read_line(&mut password);
+    let password = password.trim().to_owned();
+
+    let ud = persistence::load_user_data(&email, password).unwrap();
+    
     let srp_values = generate_client_srp_exchange_value();
     let login = LoginHandshakeStart {
         a_pub: general_purpose::STANDARD.encode(srp_values.a_pub),
         email: email.to_owned(),
-        account_id,
+        account_id: ud.account_id,
     };
-    let resp = client
-        .post("http://localhost:3000/login")
+
+    let client = reqwest::Client::new();
+    let start_resp = client
+        .post("http://localhost:3000/login/begin")
         .json(&login)
         .send()
         .await
         .unwrap();
-    let login_resp: LoginHandshakeResponse = resp.json().await.unwrap();
+    let login_resp: LoginHandshakeStartResponse = start_resp.json().await.unwrap();
     let finalized = finalize_srp_exchange(
-        &registration_info.srp,
+        &ud.srpx,
         srp_values.a.as_slice(),
         &general_purpose::STANDARD.decode(login_resp.b_pub).unwrap(),
     );
-    println!(
-        "Shared secret: {:?}",
-        shared::crypto::hashing::sha256(&finalized)
-    );
+    let shared_secret = shared::crypto::hashing::sha256(&finalized);
+    // println!("Shared secret: {:?}", shared_secret);
+
+    let encrypted_confirmation =
+        aes256_gcm_encrypt(login_resp.handshake_id.as_bytes(), &shared_secret, &[]);
+
+    let confirmation_req = LoginHandshakeConfirmation {
+        handshake_id: login_resp.handshake_id,
+        confirmation: LoginHandshakeConfirmationValue {
+            iv: general_purpose::STANDARD.encode(&encrypted_confirmation.iv),
+            ciphertext: general_purpose::STANDARD.encode(&encrypted_confirmation.ciphertext),
+        },
+    };
+
+    let confirmation_resp = client
+        .post("http://localhost:3000/login/confirm")
+        .json(&confirmation_req)
+        .send()
+        .await
+        .unwrap();
+
+    let confirmation: LoginHandshakeConfirmationResponse = confirmation_resp.json().await.unwrap();
+    println!("Session: {:?}", confirmation.session_id);
+    persistence::save_session(&Session {
+        id: confirmation.session_id,
+        shared_secret: AutoZeroedByteArray::new(shared_secret),
+        email: email.to_string()
+    }).unwrap()
 }
 
 #[tokio::main]
@@ -114,7 +192,10 @@ async fn main() {
 
     match args.command {
         Subcommands::Register(input) => {
-            send_initial_registration_request(&input.email).await;
+            register(&input.email).await;
+        },
+        Subcommands::Login(input) => {
+            login(input.email).await
         }
     }
 }

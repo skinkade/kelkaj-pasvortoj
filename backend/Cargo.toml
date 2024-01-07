@@ -7,13 +7,19 @@ edition = "2021"
 
 [dependencies]
 shared = { path = "../shared" }
-axum = "0.7.2"
-sqlx = { version = "0.7", features = [ "runtime-tokio", "sqlite" ] }
+axum = {versions = "0.7.2", features = ["macros"]}
+sqlx = { version = "0.7", features = [ "runtime-tokio", "migrate", "postgres", "uuid", "json", "chrono" ] }
 serde = "1.0.193"
 tokio = {version = "1.35.1", features = [ "full" ]}
-tracing-subscriber = "0.3.18"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 uuid = {version = "1.6.1", features = [ "v7" ]}
 rand = "0.8.5"
 hex = "0.4.3"
 num-bigint = "0.4.4"
 base64 = "0.21.5"
+dotenvy = "0.15"
+anyhow = "1.0.79"
+chrono = "0.4.31"
+tracing = "0.1.40"
+tower-http = { version = "0.5.0", features = ["trace"] }
+serde_json = "1.0.111"

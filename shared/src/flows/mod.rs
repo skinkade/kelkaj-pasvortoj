@@ -7,7 +7,7 @@ use crate::crypto::{self, aes256_gcm_encrypt, compute_srp_verifier};
 use crate::derivation;
 use crate::primitives::{
     AccountUnlockKey, AutoZeroedByteArray, NormalizedEmail, NormalizedPassword, Salt, SecretKey,
-    SecureRemotePasswordSecret, SrpVerifier,
+    SecureRemotePasswordSecret, SrpVerifier, Pbkdf2Params, AukEncryptedData,
 };
 
 pub struct RegistrationInfo {
@@ -17,6 +17,7 @@ pub struct RegistrationInfo {
     pub private_key: RsaPrivateKey,
     pub public_key: RsaPublicKey,
     pub encrypted_private_key: Vec<u8>,
+    pub encrypted_private_key_iv: Vec<u8>,
     pub key_set_id: Uuid,
     pub device_id: Uuid,
     pub authentication_salt: Salt,
@@ -75,6 +76,7 @@ pub fn generate_registration_info(password: &str, email: &str, account_id: &str)
         private_key,
         public_key,
         encrypted_private_key,
+        encrypted_private_key_iv: private_key_enc_iv,
         key_set_id,
         device_id,
         authentication_salt,
@@ -108,13 +110,13 @@ pub struct RegistrationInitiationRequest {
 
 #[derive(Serialize, Deserialize, Debug)]
 pub struct RegistrationCompletionRequest {
-    pub invite_id: String,
+    pub invite_id: Uuid,
     pub acceptance_token: String,
-    // pub encryption_key_salt: String,
-    pub public_key: String,
-    // pub encrypted_private_key: String,
-    // pub authentication_salt: String,
+    pub auk_params: Pbkdf2Params,
     pub srp_verifier: String,
+    pub srp_params: Pbkdf2Params,
+    pub public_key: String,
+    pub enc_priv_key: AukEncryptedData
 }
 
 #[derive(Serialize, Deserialize, Debug)]
@@ -125,6 +127,24 @@ pub struct LoginHandshakeStart {
 }
 
 #[derive(Serialize, Deserialize, Debug)]
-pub struct LoginHandshakeResponse {
+pub struct LoginHandshakeStartResponse {
+    pub handshake_id: uuid::Uuid,
     pub b_pub: String
+}
+
+#[derive(Serialize, Deserialize, Debug)]
+pub struct LoginHandshakeConfirmationValue {
+    pub iv: String,
+    pub ciphertext: String,
+}
+
+#[derive(Serialize, Deserialize, Debug)]
+pub struct LoginHandshakeConfirmation {
+    pub handshake_id: uuid::Uuid,
+    pub confirmation: LoginHandshakeConfirmationValue
+}
+
+#[derive(Serialize, Deserialize, Debug)]
+pub struct LoginHandshakeConfirmationResponse {
+    pub session_id: uuid::Uuid
 }
