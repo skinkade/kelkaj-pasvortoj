@@ -1,4 +1,4 @@
-Highly experimental learning project for Rust, drawing from parts of 1Password's [security design whitepaper](https://1passwordstatic.com/files/security/1password-white-paper.pdf).
+Highly experimental learning project for Rust, drawing from parts of 1Password's [security design whitepaper](https://1passwordstatic.com/files/security/1password-white-paper.pdf). Warning: code is very much in the 'get it working', pre-cleanup/refactor phase.
 
 Implements the various cryptographic exchanges (e.g. `SRP`) necessary for basic (non-OAuth) registration and logging in, with a default user vault created at registration time. Currently working on CRUD for vault items.
 
@@ -16,7 +16,7 @@ Project name translates to 'some passwords' in Esperanto :)
 ```
 
 # CLI
-```
+```shell
 > cd cli
 > cargo run register foobar@example.com
 Sending registration request...
