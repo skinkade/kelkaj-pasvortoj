@@ -7,7 +7,7 @@ use crate::crypto::{self, aes256_gcm_encrypt, compute_srp_verifier};
 use crate::derivation;
 use crate::primitives::{
     AccountUnlockKey, AutoZeroedByteArray, NormalizedEmail, NormalizedPassword, Salt, SecretKey,
-    SecureRemotePasswordSecret, SrpVerifier, Pbkdf2Params, AukEncryptedData,
+    SecureRemotePasswordSecret, SrpVerifier, Pbkdf2Params, Aes256GcmEncryptedData,
 };
 
 pub struct RegistrationInfo {
@@ -116,7 +116,10 @@ pub struct RegistrationCompletionRequest {
     pub srp_verifier: String,
     pub srp_params: Pbkdf2Params,
     pub public_key: String,
-    pub enc_priv_key: AukEncryptedData
+    pub enc_priv_key: Aes256GcmEncryptedData,
+    pub enc_vault_details: Aes256GcmEncryptedData,
+    pub enc_vault_overview: Aes256GcmEncryptedData,
+    pub enc_vault_key: String
 }
 
 #[derive(Serialize, Deserialize, Debug)]

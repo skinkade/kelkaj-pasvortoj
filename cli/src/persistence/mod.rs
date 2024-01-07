@@ -11,7 +11,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::json;
 use shared::{
     crypto,
-    primitives::{NormalizedPassword, SecretKey, Pbkdf2Params, AukEncryptedData},
+    primitives::{NormalizedPassword, SecretKey, Pbkdf2Params, Aes256GcmEncryptedData},
 };
 use shared::{
     crypto::aes256_gcm_decrypt,
@@ -32,9 +32,9 @@ pub struct SerializedUserData {
     pub account_string: String,
     pub auk_gen_params: Pbkdf2Params,
     pub srp_gen_params: Pbkdf2Params,
-    pub enc_srp: AukEncryptedData,
+    pub enc_srp: Aes256GcmEncryptedData,
     pub pub_key: String,
-    pub enc_priv_key: AukEncryptedData,
+    pub enc_priv_key: Aes256GcmEncryptedData,
 }
 
 pub struct UserData {
@@ -91,7 +91,7 @@ pub fn save_user_data(ud: &UserData) -> Result<()> {
         &['A' as u8, '3' as u8],
     );
 
-    let enc_srp = AukEncryptedData {
+    let enc_srp = Aes256GcmEncryptedData {
         ciphertext: b64::STANDARD.encode(&enc_srp.ciphertext),
         iv: b64::STANDARD.encode(&enc_srp.iv),
     };
@@ -105,7 +105,7 @@ pub fn save_user_data(ud: &UserData) -> Result<()> {
         ud.auk.0.as_slice(),
         &['A' as u8, '3' as u8],
     );
-    let enc_priv_key = AukEncryptedData {
+    let enc_priv_key = Aes256GcmEncryptedData {
         ciphertext: b64::STANDARD.encode(&enc_priv_key.ciphertext),
         iv: b64::STANDARD.encode(&enc_priv_key.iv),
     };

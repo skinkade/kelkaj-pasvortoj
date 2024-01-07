@@ -4,6 +4,7 @@ use aes_gcm::{
     aead::{Aead, AeadCore, KeyInit, Payload},
     Aes256Gcm, Key, Nonce,
 };
+use base64::{engine::general_purpose, Engine};
 use num_bigint::{self, BigUint, ToBigUint};
 use rand::rngs::OsRng;
 use rand::RngCore;
@@ -15,7 +16,7 @@ use srp::{
     utils::{compute_k, compute_u},
 };
 
-use crate::primitives::{AutoZeroedByteArray, SecureRemotePasswordSecret, SrpVerifier};
+use crate::primitives::{AutoZeroedByteArray, SecureRemotePasswordSecret, SrpVerifier, Aes256GcmEncryptedData};
 
 pub fn crypt_rand_uniform(upper_bound: u32) -> u32 {
     if upper_bound < 2 {
@@ -40,6 +41,15 @@ pub fn crypt_rand_uniform(upper_bound: u32) -> u32 {
 pub struct Aes256GcmOutput {
     pub ciphertext: Vec<u8>,
     pub iv: Vec<u8>,
+}
+
+impl Aes256GcmOutput {
+    pub fn to_b64(&self) -> Aes256GcmEncryptedData {
+        Aes256GcmEncryptedData {
+            iv: general_purpose::STANDARD.encode(&self.iv),
+            ciphertext: general_purpose::STANDARD.encode(&self.ciphertext)
+        }
+    }
 }
 
 pub fn aes256_gcm_encrypt(plaintext: &[u8], key: &[u8], additional_data: &[u8]) -> Aes256GcmOutput {

@@ -64,7 +64,7 @@ pub async fn create_invite(
 pub async fn accept_invite(
     Extension(pool): Extension<PgPool>,
     Json(payload): Json<shared::flows::RegistrationCompletionRequest>,
-) -> StatusCode {
+) -> Result<StatusCode, ()> {
     // println!("{:?}", payload);
     let invite = sqlx::query_as::<_, models::Invite>(
         "
@@ -79,6 +79,8 @@ pub async fn accept_invite(
     .unwrap();
 
     assert!(invite.acceptance_token == payload.acceptance_token);
+
+    let mut tx = pool.begin().await.unwrap();
 
     let user_id = uuid::Uuid::now_v7();
     sqlx::query(
@@ -102,9 +104,42 @@ pub async fn accept_invite(
     .bind(json!(payload.srp_params))
     .bind(payload.public_key)
     .bind(json!(payload.enc_priv_key))
-    .execute(&pool)
+    .execute(&mut *tx)
     .await
     .unwrap();
 
-    StatusCode::OK
+    let vault_id = uuid::Uuid::now_v7();
+    let acl_id = uuid::Uuid::now_v7();
+
+    sqlx::query("
+        INSERT INTO user_vaults
+        (id, enc_overview, enc_details)
+        VALUES
+        ($1, $2, $3)
+    ")
+    .bind(vault_id)
+    .bind(json!(payload.enc_vault_overview))
+    .bind(json!(payload.enc_vault_details))
+    .execute(&mut *tx)
+    .await
+    .unwrap();
+
+    sqlx::query("
+        INSERT INTO user_vaults_access
+        (id, user_id, user_vault_id, enc_vault_key, owner_flag)
+        VALUES
+        ($1, $2, $3, $4, $5)
+    ")
+    .bind(acl_id)
+    .bind(user_id)
+    .bind(vault_id)
+    .bind(payload.enc_vault_key)
+    .bind(true)
+    .execute(&mut *tx)
+    .await
+    .unwrap();
+
+    tx.commit().await.unwrap();
+
+    Ok(StatusCode::OK)
 }

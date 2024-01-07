@@ -91,7 +91,17 @@ pub struct Pbkdf2Params {
 }
 
 #[derive(Debug, Serialize, Deserialize)]
-pub struct AukEncryptedData {
+pub struct Aes256GcmEncryptedData {
     pub ciphertext: String,
     pub iv: String,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct VaultOverview {
+    pub title: String,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct VaultDetails {
+    pub description: String,
 }

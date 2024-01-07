@@ -2,15 +2,17 @@ use base64::{engine::general_purpose, Engine};
 use clap::{Args, Parser, Subcommand};
 use pkcs1::EncodeRsaPublicKey;
 use serde_json::json;
+use sha2::Sha256;
 use shared::{
     crypto::{aes256_gcm_encrypt, finalize_srp_exchange, generate_client_srp_exchange_value},
     flows::{
         generate_registration_info, LoginHandshakeConfirmation, LoginHandshakeConfirmationResponse,
         LoginHandshakeConfirmationValue, LoginHandshakeStart, LoginHandshakeStartResponse,
         RegistrationCompletionRequest, RegistrationInitiationRequest,
-    }, primitives::{Pbkdf2Params, AukEncryptedData, NormalizedPassword, AutoZeroedByteArray},
+    }, primitives::{Pbkdf2Params, Aes256GcmEncryptedData, NormalizedPassword, AutoZeroedByteArray, VaultOverview, VaultDetails}, rsa::Oaep,
 };
-use std::io::{self, BufRead, Write};
+use std::{io::{self, BufRead, Write}, fmt::format};
+use rand::{rngs::OsRng, RngCore};
 
 use crate::persistence::{UserData, Session};
 mod persistence;
@@ -26,7 +28,7 @@ struct LoginInput {
 }
 
 #[derive(Subcommand, Debug)]
-pub enum Subcommands {
+enum Subcommands {
     Register(RegisterInput),
     Login(LoginInput)
 }
@@ -76,6 +78,24 @@ async fn register(email: &str) {
 
     let registration_info = generate_registration_info(&password, &email, &account_id);
 
+    let mut rng = rand::thread_rng();
+    let mut vault_key = [0u8; 32];
+    rng.fill_bytes(&mut vault_key);
+
+    let padding = Oaep::new::<Sha256>();
+
+    let enc_vault_key = registration_info.public_key.encrypt(&mut rng, padding, &vault_key).unwrap();
+
+    let vault_overview = VaultOverview {
+        title: "Default Vault".to_string()
+    };
+    let enc_vault_overview = aes256_gcm_encrypt(json!(vault_overview).to_string().as_bytes(), &vault_key, &[]).to_b64();
+
+    let vault_details = VaultDetails {
+        description: format!("Default vault belonging to {}", email)
+    };
+    let enc_vault_details = aes256_gcm_encrypt(json!(vault_details).to_string().as_bytes(), &vault_key, &[]).to_b64();
+
     let confirmation = RegistrationCompletionRequest {
         invite_id: uuid::Uuid::parse_str(&invite_id).unwrap(),
         acceptance_token,
@@ -97,10 +117,13 @@ async fn register(email: &str) {
                 .unwrap()
                 .as_bytes(),
         ),
-        enc_priv_key: AukEncryptedData {
+        enc_priv_key: Aes256GcmEncryptedData {
             iv: general_purpose::STANDARD.encode(&registration_info.encrypted_private_key_iv),
             ciphertext: general_purpose::STANDARD.encode(&registration_info.encrypted_private_key)
-        }
+        },
+        enc_vault_overview,
+        enc_vault_details,
+        enc_vault_key: general_purpose::STANDARD.encode(&enc_vault_key)
     };
 
     let resp = client
