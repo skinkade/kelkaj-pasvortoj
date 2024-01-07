@@ -98,6 +98,7 @@ async fn main() -> anyhow::Result<()> {
         .route("/invites/accept", post(api::registration::accept_invite))
         .route("/login/begin", post(api::login::begin_login))
         .route("/login/confirm", post(api::login::confirm_login))
+        .route("/rpc", post(api::rpc::process_command))
         // .route("/login", post(begin_login))
         .layer(Extension(db_pool))
         .layer(TraceLayer::new_for_http());

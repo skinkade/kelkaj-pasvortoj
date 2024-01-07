@@ -2,6 +2,7 @@ pub mod primitives;
 pub mod derivation;
 pub mod crypto;
 pub mod flows;
+pub mod rpc;
 
 pub use rsa;
 // pub use pkcs1;

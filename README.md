@@ -34,4 +34,16 @@ Registration successful!
 Enter password: ********
 ...
 Session: 018ce1a7-e278-7eb5-90d3-730b44540ff5
+
+> cargo run add-vault-item foobar@example.com
+Account password: ********
+
+Item description: foo desc
+Item username: bar user
+Item password: baz pass
+
+> cargo run get-default-vault foobar@example.com
+Account password: ********
+
+Vault { id: 018ce4be-c5ed-79c4-a9d0-ca6662de5a80, key: ..., overview: VaultOverview { title: "Default Vault" }, details: VaultDetails { description: "Default vault belonging to foobar@example.com" }, items: [VaultItem { id: 018ce624-0d6a-75b7-8d58-c97f18a280e9, overview: VaultItemOverview { description: "foo desc" }, details: VaultItemDetails { username: "bar user", password: "baz pass" } }] }
 ```

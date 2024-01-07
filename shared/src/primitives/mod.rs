@@ -9,6 +9,7 @@ pub fn zero_byte_array(arr: &mut Vec<u8>) {
     }
 }
 
+#[derive(Debug)]
 pub struct AutoZeroedByteArray(Vec<u8>);
 
 impl AutoZeroedByteArray {
