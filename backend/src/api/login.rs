@@ -12,11 +12,9 @@ use rand::{rngs::OsRng, RngCore};
 use shared::{
     crypto::{crypt_rand_uniform, generate_server_srp_exchange_values, aes256_gcm_decrypt},
     flows::{LoginHandshakeStartResponse, LoginHandshakeConfirmationResponse},
-    primitives::{AutoZeroedByteArray, SrpVerifier},
+    primitives::{AutoZeroedByteArray, SrpVerifier, Aes256GcmEncryptedData}, utils::{b64_url_decode, b64_url_encode},
 };
 use sqlx::{postgres::PgPoolOptions, Pool, Postgres, PgPool};
-
-use base64::{engine::general_purpose, Engine};
 
 use crate::models;
 
@@ -45,9 +43,9 @@ pub async fn begin_login(
     .unwrap();
 
     let v = SrpVerifier(AutoZeroedByteArray::new(
-        general_purpose::STANDARD.decode(&user.srp_verifier).unwrap(),
+        b64_url_decode(&user.srp_verifier).unwrap(),
     ));
-    let a_pub = general_purpose::STANDARD.decode(payload.a_pub).unwrap();
+    let a_pub = b64_url_decode(&payload.a_pub).unwrap();
 
     let srp_values = generate_server_srp_exchange_values(v, a_pub);
 
@@ -76,7 +74,7 @@ pub async fn begin_login(
 
     Json(LoginHandshakeStartResponse {
         handshake_id,
-        b_pub: general_purpose::STANDARD.encode(srp_values.b_pub),
+        b_pub: b64_url_encode(&srp_values.b_pub),
     })
 }
 
@@ -96,12 +94,8 @@ pub async fn confirm_login(
 
     assert!(handshake.expiration > chrono::Utc::now());
 
-    let decrypted = aes256_gcm_decrypt(
-        &general_purpose::STANDARD.decode(payload.confirmation.ciphertext).unwrap(),
-        &handshake.shared_secret,
-        &general_purpose::STANDARD.decode(payload.confirmation.iv).unwrap(),
-        &[])
-        .unwrap();
+    let confirmation = Aes256GcmEncryptedData::from_b64(payload.confirmation).unwrap();
+    let decrypted = aes256_gcm_decrypt(confirmation, &handshake.shared_secret, None).unwrap();
 
     assert!(decrypted == handshake.id.as_bytes());
 

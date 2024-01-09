@@ -3,6 +3,7 @@ pub mod derivation;
 pub mod crypto;
 pub mod flows;
 pub mod rpc;
+pub mod utils;
 
 pub use rsa;
 // pub use pkcs1;

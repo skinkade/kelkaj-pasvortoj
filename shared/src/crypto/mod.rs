@@ -1,4 +1,5 @@
 pub mod hashing;
+use anyhow::{Result, Context};
 
 use aes_gcm::{
     aead::{Aead, AeadCore, KeyInit, Payload},
@@ -16,7 +17,7 @@ use srp::{
     utils::{compute_k, compute_u},
 };
 
-use crate::primitives::{AutoZeroedByteArray, SecureRemotePasswordSecret, SrpVerifier, Aes256GcmEncryptedData};
+use crate::primitives::{AutoZeroedByteArray, SecureRemotePasswordSecret, SrpVerifier, Aes256GcmEncryptedDataB64, Aes256GcmEncryptedData};
 
 pub fn crypt_rand_uniform(upper_bound: u32) -> u32 {
     if upper_bound < 2 {
@@ -38,21 +39,7 @@ pub fn crypt_rand_uniform(upper_bound: u32) -> u32 {
     (r % upper_bound) as u32
 }
 
-pub struct Aes256GcmOutput {
-    pub ciphertext: Vec<u8>,
-    pub iv: Vec<u8>,
-}
-
-impl Aes256GcmOutput {
-    pub fn to_b64(&self) -> Aes256GcmEncryptedData {
-        Aes256GcmEncryptedData {
-            iv: general_purpose::STANDARD.encode(&self.iv),
-            ciphertext: general_purpose::STANDARD.encode(&self.ciphertext)
-        }
-    }
-}
-
-pub fn aes256_gcm_encrypt(plaintext: &[u8], key: &[u8], additional_data: &[u8]) -> Aes256GcmOutput {
+pub fn aes256_gcm_encrypt(plaintext: &[u8], key: &[u8], additional_data: &[u8]) -> Aes256GcmEncryptedData {
     let key = Key::<Aes256Gcm>::from_slice(key);
     let cipher = Aes256Gcm::new(&key);
     let nonce = Aes256Gcm::generate_nonce(&mut OsRng);
@@ -64,24 +51,27 @@ pub fn aes256_gcm_encrypt(plaintext: &[u8], key: &[u8], additional_data: &[u8]) 
 
     let ciphertext = cipher.encrypt(&nonce, payload).unwrap();
 
-    Aes256GcmOutput {
-        ciphertext,
-        iv: nonce.to_vec(),
+    Aes256GcmEncryptedData {
+        ciphertext: AutoZeroedByteArray::new(ciphertext),
+        iv: AutoZeroedByteArray::new(nonce.to_vec())
     }
 }
 
 pub fn aes256_gcm_decrypt(
-    ciphertext: &[u8],
+    data: Aes256GcmEncryptedData,
     key: &[u8],
-    nonce: &[u8],
-    additional_data: &[u8],
-) -> Result<Vec<u8>, aes_gcm::Error> {
+    additional_data: Option<&[u8]>,
+) -> Result<Vec<u8>, aes_gcm::aead::Error> {
+    let additional_data = match additional_data {
+        Some(bs) => bs,
+        None => &[]
+    };
     let key = Key::<Aes256Gcm>::from_slice(key);
-    let nonce = Nonce::from_slice(nonce);
+    let nonce = Nonce::from_slice(data.iv.as_slice());
     let cipher = Aes256Gcm::new(&key);
 
     let payload = Payload {
-        msg: ciphertext,
+        msg: data.ciphertext.as_slice(),
         aad: additional_data,
     };
 
@@ -163,95 +153,6 @@ pub fn finalize_srp_exchange(x: &SecureRemotePasswordSecret, a: &[u8], b_pub: &[
 
     key.to_bytes_be()
 }
-
-// /// Computes SRP verifier `v` from secret `x`.
-// /// Whitepaper p.83
-// pub fn compute_srp_verifier(secret: &SecureRemotePasswordSecret) -> SrpVerifier {
-//     let x = BigUint::from_bytes_le(secret.0.as_slice());
-//     let v = G_4096.g.modpow(&x, &G_4096.n).to_bytes_le();
-
-//     SrpVerifier(AutoZeroedByteArray::new(v))
-// }
-
-// pub struct SrpClientExchangeValues {
-//     secret: AutoZeroedByteArray,
-//     public: Vec<u8>,
-// }
-
-// pub fn generate_client_srp_exchange_value() -> SrpClientExchangeValues {
-//     let mut a_bytes = [0u8; 32];
-//     OsRng.fill_bytes(&mut a_bytes);
-//     let a_num = BigUint::from_bytes_le(a_bytes.as_slice());
-
-//     // A = g^a
-//     let a_pub = G_4096.g.modpow(&a_num, &G_4096.n).to_bytes_le();
-
-//     SrpClientExchangeValues {
-//         secret: AutoZeroedByteArray::new(a_bytes.to_vec()),
-//         public: a_pub,
-//     }
-// }
-
-// pub struct SrpServerExchangeValues {
-//     shared_secret: AutoZeroedByteArray,
-//     secret: AutoZeroedByteArray,
-//     public: Vec<u8>,
-// }
-
-// pub fn generate_server_srp_exchange_values(
-//     verifier: SrpVerifier,
-//     client_input: Vec<u8>,
-// ) -> SrpServerExchangeValues {
-//     let v = BigUint::from_bytes_le(&verifier.0.as_slice());
-//     let a_pub = BigUint::from_bytes_le(&client_input);
-
-//     let mut b_bytes = [0u8; 32];
-//     OsRng.fill_bytes(&mut b_bytes);
-//     let b_num = BigUint::from_bytes_le(&b_bytes);
-
-//     // k = A^b
-//     let k = a_pub.modpow(&b_num, &G_4096.n);
-
-//     // B = kv + g^b
-//     let b_pub = (k * v.clone()) + G_4096.g.modpow(&b_num, &G_4096.n);
-
-//     let u_bytes = vec![client_input, b_pub.to_bytes_le()].concat();
-//     let u_bytes = hashing::sha256(&u_bytes);
-//     let u_num = BigUint::from_bytes_le(&u_bytes);
-
-//     // S = (Av^u)^b
-//     let big_s = (a_pub * v.clone().modpow(&u_num, &G_4096.n)).modpow(&b_num, &G_4096.n);
-
-//     SrpServerExchangeValues {
-//         shared_secret: AutoZeroedByteArray::new(big_s.to_bytes_le()),
-//         secret: AutoZeroedByteArray::new(b_bytes.to_vec()),
-//         public: b_pub.to_bytes_le(),
-//     }
-// }
-
-// pub fn finalize_srp_exchange(
-//     srp_secret: &SecureRemotePasswordSecret,
-//     client_secret: &[u8],
-//     server_public: &[u8],
-// ) -> Vec<u8> {
-//     let x = BigUint::from_bytes_le(srp_secret.0.as_slice());
-//     let a = BigUint::from_bytes_le(client_secret);
-//     let a_pub = G_4096.g.modpow(&a, &G_4096.n);
-//     let b_pub = BigUint::from_bytes_le(&server_public);
-
-//     let u_bytes = vec![a_pub.to_bytes_le(), server_public.to_vec()].concat();
-//     let u_bytes = hashing::sha256(&u_bytes);
-//     let u_num = BigUint::from_bytes_le(&u_bytes);
-
-//     // k = B^a
-//     let k = b_pub.modpow(&a, &G_4096.n);
-
-//     // S = (B - kg^x)^(a+ux)
-//     let aux = a + (u_num * x.clone());
-//     let big_s = (b_pub - (k * G_4096.g.modpow(&x, &G_4096.n))).modpow(&aux, &G_4096.n);
-
-//     big_s.to_bytes_le()
-// }
 
 #[cfg(test)]
 #[test]

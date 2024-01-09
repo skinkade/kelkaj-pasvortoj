@@ -2,6 +2,8 @@ use serde::{Serialize, Deserialize};
 use unicode_normalization::UnicodeNormalization;
 use std::fmt::Display;
 use crate::crypto::crypt_rand_uniform;
+use crate::utils::{b64_url_encode, b64_url_decode};
+use anyhow::Result;
 
 pub fn zero_byte_array(arr: &mut Vec<u8>) {
     for i in 0..arr.len() {
@@ -9,7 +11,7 @@ pub fn zero_byte_array(arr: &mut Vec<u8>) {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Serialize, Deserialize)]
 pub struct AutoZeroedByteArray(Vec<u8>);
 
 impl AutoZeroedByteArray {
@@ -19,6 +21,15 @@ impl AutoZeroedByteArray {
 
     pub fn as_slice(&self) -> &[u8] {
         self.0.as_slice()
+    }
+
+    pub fn to_b64(&self) -> String {
+        b64_url_encode(&self.as_slice())
+    }
+
+    pub fn from_b64(encoded: &str) -> Result<Self> {
+        let decoded = b64_url_decode(encoded)?;
+        Ok(AutoZeroedByteArray::new(decoded))
     }
 }
 
@@ -80,7 +91,7 @@ pub struct AccountUnlockKey(pub AutoZeroedByteArray);
 // "SRP-x"
 pub struct SecureRemotePasswordSecret(pub AutoZeroedByteArray);
 
-pub struct Salt(pub Vec<u8>);
+pub struct Salt(pub AutoZeroedByteArray);
 
 pub struct SrpVerifier(pub AutoZeroedByteArray);
 
@@ -93,8 +104,32 @@ pub struct Pbkdf2Params {
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct Aes256GcmEncryptedData {
+    pub ciphertext: AutoZeroedByteArray,
+    pub iv: AutoZeroedByteArray,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct Aes256GcmEncryptedDataB64 {
     pub ciphertext: String,
     pub iv: String,
+}
+
+impl Aes256GcmEncryptedData {
+    pub fn to_b64(&self) -> Aes256GcmEncryptedDataB64 {
+        Aes256GcmEncryptedDataB64 {
+            ciphertext: self.ciphertext.to_b64(),
+            iv: self.iv.to_b64()
+        }
+    }
+
+    pub fn from_b64(data: Aes256GcmEncryptedDataB64) -> Result<Aes256GcmEncryptedData> {
+        let ciphertext = AutoZeroedByteArray::from_b64(&data.ciphertext)?;
+        let iv = AutoZeroedByteArray::from_b64(&data.iv)?;
+        Ok(Aes256GcmEncryptedData {
+            ciphertext,
+            iv
+        })
+    }
 }
 
 #[derive(Debug, Serialize, Deserialize)]

@@ -5,13 +5,16 @@ use std::{
 };
 
 use anyhow::{anyhow, Result};
-use base64::{engine::general_purpose as b64, Engine};
 use pkcs1::{DecodeRsaPrivateKey, DecodeRsaPublicKey, EncodeRsaPrivateKey, EncodeRsaPublicKey};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use shared::{
     crypto,
-    primitives::{NormalizedPassword, SecretKey, Pbkdf2Params, Aes256GcmEncryptedData},
+    primitives::{
+        Aes256GcmEncryptedData, Aes256GcmEncryptedDataB64, NormalizedPassword, Pbkdf2Params,
+        SecretKey,
+    },
+    utils::{b64_url_decode, b64_url_encode},
 };
 use shared::{
     crypto::aes256_gcm_decrypt,
@@ -32,9 +35,9 @@ pub struct SerializedUserData {
     pub account_string: String,
     pub auk_gen_params: Pbkdf2Params,
     pub srp_gen_params: Pbkdf2Params,
-    pub enc_srp: Aes256GcmEncryptedData,
+    pub enc_srp: Aes256GcmEncryptedDataB64,
     pub pub_key: String,
-    pub enc_priv_key: Aes256GcmEncryptedData,
+    pub enc_priv_key: Aes256GcmEncryptedDataB64,
 }
 
 pub struct UserData {
@@ -55,7 +58,9 @@ fn persist_serialized_user_data(sud: &SerializedUserData) -> Result<()> {
     let json = json!(sud).to_string();
 
     let home = home::home_dir().unwrap();
-    let path = home.join(".kelkaj-pasvortoj").join(format!("{}.json", email.0));
+    let path = home
+        .join(".kelkaj-pasvortoj")
+        .join(format!("{}.json", email.0));
 
     let mut file = match File::create(&path) {
         Err(why) => return Err(anyhow!("couldn't create {}: {}", path.display(), why)),
@@ -75,13 +80,13 @@ pub fn save_user_data(ud: &UserData) -> Result<()> {
 
     let auk_gen_params = Pbkdf2Params {
         algo: "PBKDF2-HMAC-SHA256".to_string(),
-        salt: b64::STANDARD.encode(&ud.auk_salt.0),
+        salt: ud.auk_salt.0.to_b64(),
         iterations: 650_000,
     };
 
     let srp_gen_params = Pbkdf2Params {
         algo: "PBKDF2-HMAC-SHA256".to_string(),
-        salt: b64::STANDARD.encode(&ud.srp_salt.0),
+        salt: ud.srp_salt.0.to_b64(),
         iterations: 650_000,
     };
 
@@ -91,13 +96,10 @@ pub fn save_user_data(ud: &UserData) -> Result<()> {
         &['A' as u8, '3' as u8],
     );
 
-    let enc_srp = Aes256GcmEncryptedData {
-        ciphertext: b64::STANDARD.encode(&enc_srp.ciphertext),
-        iv: b64::STANDARD.encode(&enc_srp.iv),
-    };
+    let enc_srp = enc_srp.to_b64();
 
     let pub_key = ud.pub_key.to_pkcs1_der().unwrap();
-    let pub_key = b64::STANDARD.encode(pub_key.as_bytes());
+    let pub_key = b64_url_encode(pub_key.as_bytes());
 
     let priv_key = ud.priv_key.to_pkcs1_der().unwrap();
     let enc_priv_key = aes256_gcm_encrypt(
@@ -105,10 +107,7 @@ pub fn save_user_data(ud: &UserData) -> Result<()> {
         ud.auk.0.as_slice(),
         &['A' as u8, '3' as u8],
     );
-    let enc_priv_key = Aes256GcmEncryptedData {
-        ciphertext: b64::STANDARD.encode(&enc_priv_key.ciphertext),
-        iv: b64::STANDARD.encode(&enc_priv_key.iv),
-    };
+    let enc_priv_key = enc_priv_key.to_b64();
 
     let sud = SerializedUserData {
         email,
@@ -125,7 +124,9 @@ pub fn save_user_data(ud: &UserData) -> Result<()> {
 
 fn load_serialized_user_data(email: &str) -> Result<SerializedUserData> {
     let home = home::home_dir().unwrap();
-    let path = home.join(".kelkaj-pasvortoj").join(format!("{}.json", email));
+    let path = home
+        .join(".kelkaj-pasvortoj")
+        .join(format!("{}.json", email));
 
     let file = match File::open(&path) {
         Ok(file) => file,
@@ -143,55 +144,31 @@ pub fn load_user_data(raw_email: &str, password: String) -> Result<UserData> {
     let password = NormalizedPassword::new(password);
     let account_id = serialized.account_string.substring(2, 8).to_string();
     let secret_key = serialized.account_string.substring(8, 34);
-    // println!("{}", serialized.account_string);
-    // println!("{} {}", account_id, secret_key);
     let secret_key = SecretKey(AutoZeroedByteArray::new(secret_key.as_bytes().to_vec()));
 
-    let auk_salt = b64::STANDARD
-        .decode(&serialized.auk_gen_params.salt)
-        .unwrap();
-    let auk_salt = Salt(auk_salt);
+    let auk_salt = b64_url_decode(&serialized.auk_gen_params.salt).unwrap();
+    let auk_salt = Salt(AutoZeroedByteArray::new(auk_salt));
 
     let auk =
         AccountUnlockKey::from_user_info(&password, &secret_key, &auk_salt, &email, &account_id);
 
-    let srpx = aes256_gcm_decrypt(
-        b64::STANDARD
-            .decode(&serialized.enc_srp.ciphertext)
-            .unwrap()
-            .as_slice(),
-        auk.0.as_slice(),
-        b64::STANDARD
-            .decode(&serialized.enc_srp.iv)
-            .unwrap()
-            .as_slice(),
-        &['A' as u8, '3' as u8],
-    );
+    let enc_srp = Aes256GcmEncryptedData::from_b64(serialized.enc_srp)?;
+
+    // let srpx = aes256_gcm_decrypt(&enc_srp, auk.0.as_slice(), Some(&['A' as u8, '3' as u8]));
+    let srpx = aes256_gcm_decrypt(enc_srp, auk.0.as_slice(), Some(&['A' as u8, '3' as u8]));
     let srpx = match srpx {
         Ok(bytes) => bytes,
         Err(err) => return Err(anyhow!("Failed to decrypt SRP-x: {}", err)),
     };
     let srpx = SecureRemotePasswordSecret(AutoZeroedByteArray::new(srpx));
-    let srp_salt = b64::STANDARD
-        .decode(&serialized.srp_gen_params.salt)
-        .unwrap();
-    let srp_salt = Salt(srp_salt);
+    let srp_salt = b64_url_decode(&serialized.srp_gen_params.salt).unwrap();
+    let srp_salt = Salt(AutoZeroedByteArray::new(srp_salt));
 
-    let pub_key = b64::STANDARD.decode(&serialized.pub_key).unwrap();
+    let pub_key = b64_url_decode(&serialized.pub_key).unwrap();
     let pub_key: RsaPublicKey = DecodeRsaPublicKey::from_pkcs1_der(pub_key.as_slice()).unwrap();
+    let enc_priv_key = Aes256GcmEncryptedData::from_b64(serialized.enc_priv_key)?;
 
-    let priv_key = aes256_gcm_decrypt(
-        b64::STANDARD
-            .decode(&serialized.enc_priv_key.ciphertext)
-            .unwrap()
-            .as_slice(),
-        auk.0.as_slice(),
-        b64::STANDARD
-            .decode(&serialized.enc_priv_key.iv)
-            .unwrap()
-            .as_slice(),
-        &['A' as u8, '3' as u8],
-    );
+    let priv_key = aes256_gcm_decrypt(enc_priv_key, auk.0.as_slice(), Some(&['A' as u8, '3' as u8]));
     let priv_key = match priv_key {
         Ok(bytes) => bytes,
         Err(err) => return Err(anyhow!("Failed to decrypt private key: {}", err)),
@@ -207,7 +184,7 @@ pub fn load_user_data(raw_email: &str, password: String) -> Result<UserData> {
         srpx,
         srp_salt,
         pub_key,
-        priv_key
+        priv_key,
     })
 }
 
@@ -235,7 +212,7 @@ fn user_data_persistence_test() {
         srpx: reg_info.srp,
         srp_salt: reg_info.authentication_salt,
         pub_key: reg_info.public_key,
-        priv_key: reg_info.private_key
+        priv_key: reg_info.private_key,
     };
 
     let save_result = save_user_data(&user_data);
@@ -256,14 +233,14 @@ struct SerializedSession {
 pub struct Session {
     pub id: uuid::Uuid,
     pub email: String,
-    pub shared_secret: AutoZeroedByteArray
+    pub shared_secret: AutoZeroedByteArray,
 }
 
 pub fn save_session(session: &Session) -> Result<()> {
     let ss = SerializedSession {
         id: session.id,
         email: session.email.clone(),
-        shared_secret: b64::STANDARD.encode(session.shared_secret.as_slice())
+        shared_secret: b64_url_encode(session.shared_secret.as_slice()),
     };
 
     let json = json!(ss).to_string();
@@ -296,6 +273,8 @@ pub fn load_session(email: &str) -> Result<Session> {
     Ok(Session {
         id: decoded.id,
         email: decoded.email,
-        shared_secret: AutoZeroedByteArray::new(b64::STANDARD.decode(&decoded.shared_secret).unwrap())
+        shared_secret: AutoZeroedByteArray::new(
+            b64_url_decode(&decoded.shared_secret).unwrap(),
+        ),
     })
 }

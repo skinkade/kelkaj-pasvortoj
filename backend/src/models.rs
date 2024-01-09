@@ -1,5 +1,5 @@
 use serde::Serialize;
-use shared::primitives::Aes256GcmEncryptedData;
+use shared::primitives::Aes256GcmEncryptedDataB64;
 use uuid::Uuid;
 
 #[derive(sqlx::FromRow)]
@@ -26,8 +26,8 @@ pub struct User {
 #[derive(sqlx::FromRow)]
 pub struct UserVault {
     pub id: Uuid,
-    pub enc_overview: sqlx::types::Json<Aes256GcmEncryptedData>,
-    pub enc_details: sqlx::types::Json<Aes256GcmEncryptedData>
+    pub enc_overview: sqlx::types::Json<Aes256GcmEncryptedDataB64>,
+    pub enc_details: sqlx::types::Json<Aes256GcmEncryptedDataB64>
 }
 
 #[derive(sqlx::FromRow)]
@@ -43,8 +43,8 @@ pub struct UserVaultAccess {
 pub struct UserVaultItem {
     pub id: Uuid,
     pub user_vault_id: Uuid,
-    pub enc_overview: sqlx::types::Json<Aes256GcmEncryptedData>,
-    pub enc_details: sqlx::types::Json<Aes256GcmEncryptedData>
+    pub enc_overview: sqlx::types::Json<Aes256GcmEncryptedDataB64>,
+    pub enc_details: sqlx::types::Json<Aes256GcmEncryptedDataB64>
 }
 
 #[derive(sqlx::FromRow)]
@@ -66,7 +66,7 @@ pub struct Session {
 #[derive(sqlx::FromRow, Serialize)]
 pub struct UserVaultQueryResult {
     pub id: Uuid,
-    pub enc_overview: sqlx::types::Json<Aes256GcmEncryptedData>,
-    pub enc_details: sqlx::types::Json<Aes256GcmEncryptedData>,
+    pub enc_overview: sqlx::types::Json<Aes256GcmEncryptedDataB64>,
+    pub enc_details: sqlx::types::Json<Aes256GcmEncryptedDataB64>,
     pub enc_vault_key: String,
 }

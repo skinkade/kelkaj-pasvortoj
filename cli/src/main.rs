@@ -1,4 +1,3 @@
-use base64::{engine::general_purpose, Engine};
 use clap::{Args, Parser, Subcommand};
 use pkcs1::{EncodeRsaPublicKey, DecodeRsaPrivateKey};
 use rand::{rngs::OsRng, RngCore};
@@ -16,11 +15,11 @@ use shared::{
         RegistrationCompletionRequest, RegistrationInitiationRequest,
     },
     primitives::{
-        Aes256GcmEncryptedData, AutoZeroedByteArray, NormalizedPassword, Pbkdf2Params,
-        VaultDetails, VaultOverview,
+        Aes256GcmEncryptedDataB64, AutoZeroedByteArray, NormalizedPassword, Pbkdf2Params,
+        VaultDetails, VaultOverview, Aes256GcmEncryptedData,
     },
     rpc::{EncryptedRpcPayload, RpcPayload, CreateVaultEntryPayload},
-    rsa::{Oaep, RsaPrivateKey},
+    rsa::{Oaep, RsaPrivateKey}, utils::{b64_url_decode, b64_url_encode},
 };
 use std::{
     fmt::format,
@@ -79,15 +78,15 @@ struct VaultItemDetails {
 #[derive(Debug, Deserialize)]
 pub struct EncryptedVaultItem {
     pub id: uuid::Uuid,
-    pub enc_overview: Aes256GcmEncryptedData,
-    pub enc_details: Aes256GcmEncryptedData,
+    pub enc_overview: Aes256GcmEncryptedDataB64,
+    pub enc_details: Aes256GcmEncryptedDataB64,
 }
 
 #[derive(Debug, Deserialize)]
 pub struct EncryptedVault {
     pub id: uuid::Uuid,
-    pub enc_overview: Aes256GcmEncryptedData,
-    pub enc_details: Aes256GcmEncryptedData,
+    pub enc_overview: Aes256GcmEncryptedDataB64,
+    pub enc_details: Aes256GcmEncryptedDataB64,
     pub enc_vault_key: String,
     pub items: Vec<EncryptedVaultItem>,
 }
@@ -179,29 +178,26 @@ async fn register(email: &str) {
         acceptance_token,
         auk_params: Pbkdf2Params {
             iterations: 650_000,
-            salt: general_purpose::STANDARD.encode(&registration_info.encryption_key_salt.0),
+            salt: b64_url_encode(registration_info.encryption_key_salt.0.as_slice()),
             algo: "PBKDF2-HMAC-SHA256".to_string(),
         },
-        srp_verifier: general_purpose::STANDARD.encode(registration_info.srp_verifier.0.as_slice()),
+        srp_verifier: b64_url_encode(registration_info.srp_verifier.0.as_slice()),
         srp_params: Pbkdf2Params {
             iterations: 650_000,
-            salt: general_purpose::STANDARD.encode(&registration_info.authentication_salt.0),
+            salt: b64_url_encode(registration_info.authentication_salt.0.as_slice()),
             algo: "PBKDF2-HMAC-SHA256".to_string(),
         },
-        public_key: general_purpose::STANDARD.encode(
+        public_key: b64_url_encode(
             registration_info
                 .public_key
                 .to_pkcs1_der()
                 .unwrap()
                 .as_bytes(),
         ),
-        enc_priv_key: Aes256GcmEncryptedData {
-            iv: general_purpose::STANDARD.encode(&registration_info.encrypted_private_key_iv),
-            ciphertext: general_purpose::STANDARD.encode(&registration_info.encrypted_private_key),
-        },
+        enc_priv_key: registration_info.encrypted_private_key.to_b64(),
         enc_vault_overview,
         enc_vault_details,
-        enc_vault_key: general_purpose::STANDARD.encode(&enc_vault_key),
+        enc_vault_key: b64_url_encode(&enc_vault_key),
     };
 
     let resp = client
@@ -239,7 +235,7 @@ async fn login(email: String) {
 
     let srp_values = generate_client_srp_exchange_value();
     let login = LoginHandshakeStart {
-        a_pub: general_purpose::STANDARD.encode(srp_values.a_pub),
+        a_pub: b64_url_encode(&srp_values.a_pub),
         email: email.to_owned(),
         account_id: ud.account_id,
     };
@@ -255,7 +251,7 @@ async fn login(email: String) {
     let finalized = finalize_srp_exchange(
         &ud.srpx,
         srp_values.a.as_slice(),
-        &general_purpose::STANDARD.decode(login_resp.b_pub).unwrap(),
+        &b64_url_decode(&login_resp.b_pub).unwrap(),
     );
     let shared_secret = shared::crypto::hashing::sha256(&finalized);
     // println!("Shared secret: {:?}", shared_secret);
@@ -266,8 +262,8 @@ async fn login(email: String) {
     let confirmation_req = LoginHandshakeConfirmation {
         handshake_id: login_resp.handshake_id,
         confirmation: LoginHandshakeConfirmationValue {
-            iv: general_purpose::STANDARD.encode(&encrypted_confirmation.iv),
-            ciphertext: general_purpose::STANDARD.encode(&encrypted_confirmation.ciphertext),
+            iv: b64_url_encode(encrypted_confirmation.iv.as_slice()),
+            ciphertext: b64_url_encode(encrypted_confirmation.ciphertext.as_slice()),
         },
     };
 
@@ -319,60 +315,32 @@ async fn get_default_vault_and_current_session(email: &str) -> (Vault, Session) 
     println!("{:?}", resp);
 
     let resp_payload: EncryptedRpcPayload = resp.json().await.unwrap();
-    let resp_ciphertext = general_purpose::STANDARD
-        .decode(&resp_payload.payload.ciphertext)
-        .unwrap();
-    let resp_iv = general_purpose::STANDARD
-        .decode(&resp_payload.payload.iv)
-        .unwrap();
+    let resp_payload = Aes256GcmEncryptedData::from_b64(resp_payload.payload).unwrap();
 
-    let resp_payload = aes256_gcm_decrypt(
-        &resp_ciphertext,
-        session.shared_secret.as_slice(),
-        &resp_iv,
-        &[],
-    )
-    .unwrap();
+    let resp_payload = aes256_gcm_decrypt(resp_payload, session.shared_secret.as_slice(), None).unwrap();
 
     let enc_vault: EncryptedVault  = serde_json::from_slice(&resp_payload).unwrap();
-    // println!("{:?}", enc_vault);
 
     let padding = Oaep::new::<Sha256>();
 
-    let vault_key = general_purpose::STANDARD.decode(&enc_vault.enc_vault_key).unwrap();
+    let vault_key = b64_url_decode(&enc_vault.enc_vault_key).unwrap();
     let vault_key = ud.priv_key.decrypt(padding, &vault_key).unwrap();
 
-    let vault_overview = aes256_gcm_decrypt(
-        &general_purpose::STANDARD.decode(&enc_vault.enc_overview.ciphertext).unwrap(),
-        &vault_key,
-        &general_purpose::STANDARD.decode(&enc_vault.enc_overview.iv).unwrap(),
-        &[])
-        .unwrap();
+    let vault_overview = Aes256GcmEncryptedData::from_b64(enc_vault.enc_overview).unwrap();
+    let vault_overview = aes256_gcm_decrypt(vault_overview, &vault_key, None).unwrap();
     let vault_overview: VaultOverview = serde_json::from_slice(&vault_overview).unwrap();
     
-    let vault_details = aes256_gcm_decrypt(
-        &general_purpose::STANDARD.decode(&enc_vault.enc_details.ciphertext).unwrap(),
-        &vault_key,
-        &general_purpose::STANDARD.decode(&enc_vault.enc_details.iv).unwrap(),
-        &[])
-        .unwrap();
+    let vault_details = Aes256GcmEncryptedData::from_b64(enc_vault.enc_details).unwrap();
+    let vault_details = aes256_gcm_decrypt(vault_details, &vault_key, None).unwrap();
     let vault_details: VaultDetails = serde_json::from_slice(&vault_details).unwrap();
 
     let items: Vec<VaultItem> = enc_vault.items.iter().map(|item| {
-        let overview = aes256_gcm_decrypt(
-            &general_purpose::STANDARD.decode(&item.enc_overview.ciphertext).unwrap(),
-            &vault_key,
-            &general_purpose::STANDARD.decode(&item.enc_overview.iv).unwrap(),
-            &[])
-            .unwrap();
+        let overview = Aes256GcmEncryptedData::from_b64(item.enc_overview.clone()).unwrap();
+        let overview = aes256_gcm_decrypt(overview, &vault_key, None).unwrap();
         let overview: VaultItemOverview = serde_json::from_slice(&overview).unwrap();
 
-        let details = aes256_gcm_decrypt(
-            &general_purpose::STANDARD.decode(&item.enc_details.ciphertext).unwrap(),
-            &vault_key,
-            &general_purpose::STANDARD.decode(&item.enc_details.iv).unwrap(),
-            &[])
-            .unwrap();
+        let details = Aes256GcmEncryptedData::from_b64(item.enc_details.clone()).unwrap();
+        let details = aes256_gcm_decrypt(details, &vault_key, None).unwrap();
         let details: VaultItemDetails = serde_json::from_slice(&details).unwrap();
 
         VaultItem {

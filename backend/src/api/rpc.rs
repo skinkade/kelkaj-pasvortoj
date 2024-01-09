@@ -7,7 +7,6 @@ use axum::{
     routing::{get, post},
     Json, Router,
 };
-use base64::{engine::general_purpose, Engine};
 use rand::{rngs::OsRng, RngCore};
 use serde_json::json;
 use shared::{
@@ -16,11 +15,11 @@ use shared::{
         generate_server_srp_exchange_values,
     },
     flows::LoginHandshakeStartResponse,
-    primitives::{AutoZeroedByteArray, SrpVerifier},
+    primitives::{AutoZeroedByteArray, SrpVerifier, Aes256GcmEncryptedData},
     rpc::{
         CreateVaultEntryPayload, CreateVaultEntryResponse, EncryptedRpcPayload, RpcPayload,
         RpcResponse,
-    },
+    }, utils::b64_url_decode,
 };
 use sqlx::{postgres::PgPoolOptions, PgPool, Pool, Postgres};
 use uuid::Uuid;
@@ -138,14 +137,8 @@ pub async fn process_command(
         return (StatusCode::FORBIDDEN, Json(None));
     }
 
-    let ciphertext = general_purpose::STANDARD
-        .decode(&payload.payload.ciphertext)
-        .unwrap();
-    let iv = general_purpose::STANDARD
-        .decode(&payload.payload.iv)
-        .unwrap();
-
-    let decrypted = aes256_gcm_decrypt(&ciphertext, &session.shared_secret, &iv, &[]);
+    let payload = Aes256GcmEncryptedData::from_b64(payload.payload).unwrap();
+    let decrypted = aes256_gcm_decrypt(payload, &session.shared_secret, None);
 
     let decrypted = match decrypted {
         Err(_) => return (StatusCode::FORBIDDEN, Json(None)),

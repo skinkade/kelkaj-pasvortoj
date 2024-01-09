@@ -14,7 +14,7 @@ impl Salt {
     fn generate() -> Salt {
         let mut salt = [0u8; 16];
         OsRng.fill_bytes(&mut salt);
-        Salt(salt.to_vec())
+        Salt(AutoZeroedByteArray::new(salt.to_vec()))
     }
 }
 
@@ -25,7 +25,7 @@ fn derive_key(
     email: &NormalizedEmail,
     account_id: &str,
 ) -> AutoZeroedByteArray {
-    let s_hkdf = Hkdf::<Sha256>::new(Some(&salt.0), email.0.as_bytes());
+    let s_hkdf = Hkdf::<Sha256>::new(Some(salt.0.as_slice()), email.0.as_bytes());
     let mut s = [0u8; 32];
     s_hkdf.expand(&vec!['A' as u8, '3' as u8], &mut s).unwrap();
 
